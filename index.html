@@ -67,7 +67,36 @@ function addTask(t){db.tasks.push({id:crypto.randomUUID?.()||String(Date.now()+M
 $('#quickTask').onsubmit=e=>{e.preventDefault();addTask({title:$('#taskTitle').value.trim(),date:$('#taskDate').value,subject:'عام'});e.target.reset();$('#taskDate').value=new Date().toISOString().slice(0,10)};
 $('#plannerForm').onsubmit=e=>{e.preventDefault();addTask({title:$('#plannerTitle').value.trim(),subject:$('#plannerSubject').value,date:$('#plannerDate').value,minutes:Number($('#plannerMinutes').value)||40,priority:$('#plannerPriority').value});e.target.reset();$('#plannerDate').value=new Date().toISOString().slice(0,10)};
 async function readTextFile(file){return await file.text()}
-async function extractPDF(file){if(!window.pdfjsLib)return {text:'',error:'PDF.js غير مثبت. استخدم ملف TXT أو ثبّت PDF.js محليًا وفق README.'};try{const buf=await file.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:buf}).promise;let pages=[];for(let i=1;i<=pdf.numPages;i++){const p=await pdf.getPage(i);const c=await p.getTextContent();pages.push(`\\n[الصفحة ${i}]\\n`+c.items.map(x=>x.str).join(' '))}return {text:pages.join('\\n'),pages:pdf.numPages}}catch(e){return {text:'',error:'تعذّر استخراج النص من هذا الملف.'}}}
+async function extractPDF(file) {
+  if (!window.pdfjsLib) {
+    throw new Error(
+      "مكتبة PDF.js لم تُحمّل. أعد تحميل الصفحة وتحقق من الإنترنت."
+    );
+  }
+  const data = new Uint8Array(await file.arrayBuffer());
+  const pdf = await window.pdfjsLib.getDocument({
+    data: data
+  }).promise;
+  let text = "";
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map(item => item.str || "")
+      .join(" ");
+    text += pageText + "\n\n";
+  }
+  text = text.trim();
+  if (text.length < 30) {
+    throw new Error(
+      "لم يُستخرج نص كافٍ من PDF. إذا كان الملف مصوّرًا، فقد يحتاج إلى OCR."
+    );
+  }
+  return {
+    text: text,
+    pages: pdf.numPages
+  };
+}
 async function ingest(file){if(!file)return;const ext=file.name.split('.').pop().toLowerCase();if(!['pdf','txt'].includes(ext)){toast('الملفات المدعومة حاليًا PDF وTXT');return}toast('جارٍ قراءة الملف محليًا…');let result;if(ext==='txt')result={text:await readTextFile(file)};else result=await extractPDF(file);const book={id:crypto.randomUUID?.()||String(Date.now()),name:file.name.replace(/\.[^.]+$/,''),filename:file.name,type:ext,size:file.size,text:result.text||'',pages:result.pages||null,subject:'أخرى',added:new Date().toISOString()};if(result.error)book.error=result.error;db.books.unshift(book);save();toast(result.error||'أُضيف الكتاب إلى المكتبة');if(result.error)showBook(book.id)}
 $('#fileInput').onchange=e=>{ingest(e.target.files[0]);e.target.value=''};
 const dz=$('#dropZone');['dragenter','dragover'].forEach(n=>dz.addEventListener(n,e=>{e.preventDefault();dz.classList.add('drag')}));['dragleave','drop'].forEach(n=>dz.addEventListener(n,e=>{e.preventDefault();dz.classList.remove('drag')}));dz.addEventListener('drop',e=>ingest(e.dataTransfer.files[0]));
