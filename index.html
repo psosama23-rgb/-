@@ -91,4 +91,10 @@ function net(){const online=navigator.onLine;$('#offlineBadge').textContent=onli
 window.addEventListener('online',net);window.addEventListener('offline',net);
 // نسخة ملف واحد مناسبة للنشر المباشر على الاستضافة الثابتة.
 renderAll();net();
+</script><script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
 </script></body></html>
