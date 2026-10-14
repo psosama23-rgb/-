@@ -105,7 +105,80 @@ $('#bookSearch').oninput=renderBooks;$('#subjectFilter').onchange=renderBooks;
 function showBook(id){const b=db.books.find(x=>x.id===id);if(!b)return;activeBook=id;const d=$('#bookDetail');d.classList.remove('hidden');d.innerHTML=`<div class="panel-head"><div><h3>${escapeHTML(b.name)}</h3><p>${b.pages?b.pages+' صفحة':'ملف '+b.type.toUpperCase()}</p></div><button class="btn ghost" id="closeBook">إغلاق</button></div>${b.error?`<p class="muted">${escapeHTML(b.error)}</p>`:''}<label>المادة</label><select id="bookSubject"><option ${b.subject==='أخرى'?'selected':''}>أخرى</option>${['أحياء','فيزياء','كيمياء','رياضيات','عربي','إنجليزي','دين','تكنولوجيا'].map(s=>`<option ${b.subject===s?'selected':''}>${s}</option>`).join('')}</select><p class="muted">النص المستخرج: ${b.text.length.toLocaleString('ar')} حرف</p><div class="readable" style="max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:12px">${escapeHTML(b.text.slice(0,5000)||'لا يوجد نص قابل للعرض. قد يكون PDF مصورًا ويحتاج OCR.')}${b.text.length>5000?'\\n…':''}</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:13px"><button class="btn primary" id="toSummary">إنشاء ملخص</button><button class="btn ghost" id="toQuiz">إنشاء أسئلة</button><button class="btn ghost" id="downloadText">تنزيل النص</button></div>`;$('#closeBook').onclick=()=>d.classList.add('hidden');$('#bookSubject').onchange=e=>{b.subject=e.target.value;save()};$('#toSummary').onclick=()=>{fillBookSelects();$('#summaryBook').value=id;nav('summaries')};$('#toQuiz').onclick=()=>{fillBookSelects();$('#quizBook').value=id;nav('quiz')};$('#downloadText').onclick=()=>download(b.name+'.txt',b.text,'text/plain;charset=utf-8');d.scrollIntoView({behavior:'smooth',block:'start'})}
 function fillBookSelects(){for(const id of ['summaryBook','quizBook']){const s=$('#'+id);if(!s)continue;const old=s.value;s.innerHTML=db.books.map(b=>`<option value="${b.id}">${escapeHTML(b.name)}</option>`).join('')||'<option value="">أضف كتابًا أولًا</option>';if(db.books.some(b=>b.id===old))s.value=old}}
 function chunks(text){return text.split(/(?<=[.!؟?])\\s+|\\n+/).map(x=>x.trim()).filter(x=>x.length>35)}
-function localSummary(text,style,scope){let sentences=chunks(text);if(!sentences.length)return 'لم أجد نصًا كافيًا. تأكد أن PDF يحتوي على نص قابل للاستخراج أو استخدم OCR محليًا.';let limit=style==='brief'?Math.min(12,Math.ceil(sentences.length*.15)):style==='terms'?Math.min(18,Math.ceil(sentences.length*.25)):style==='compare'?Math.min(16,Math.ceil(sentences.length*.2)):Math.min(30,Math.ceil(sentences.length*.35));let chosen=[];let step=Math.max(1,Math.floor(sentences.length/limit));for(let i=0;i<sentences.length&&chosen.length<limit;i+=step)chosen.push(sentences[i]);let heading=style==='brief'?'أهم الأفكار للمراجعة':style==='terms'?'مصطلحات ونقاط بارزة':style==='compare'?'نقاط تصلح للمقارنة':'ملخص منظّم مبدئي';return `${heading}${scope?' — النطاق: '+scope:''}\\n\\n`+chosen.map((s,i)=>`${i+1}. ${s}`).join('\\n\\n')+'\\n\\nتنبيه: هذه مسودة استخراج واختيار جمل، وليست تلخيصًا دلاليًا مولدًا بنموذج لغوي. راجعها مع الكتاب.'}
+function localSummary(text, style, scope) {
+  if (!text || !text.trim()) {
+    return "لم أجد نصًا كافيًا. تأكد من قراءة PDF أو استخدم OCR للملفات المصوّرة.";
+  }
+  // تنظيف النص المستخرج من PDF
+  let clean = text
+    .replace(/\uFFFD/g, " ")
+    .replace(/https?:\/\/\S+|www\.\S+/gi, " ")
+    .replace(/SIGNED TRACK\s+\S+/gi, " ")
+    .replace(/RESOURCE\s*#?\s*\d+/gi, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/([ء-ي])\s{2,}([ء-ي])/g, "$1 $2")
+    .trim();
+  // تقسيم النص إلى جمل
+  let sentences = chunks(clean)
+    .map(s => s.replace(/\s+/g, " ").trim())
+    .filter(s => s.length >= 25)
+    .filter(s => !/^(www\.|https?:|SIGNED TRACK|RESOURCE #)/i.test(s));
+  // إزالة الجمل المتكررة
+  let seen = new Set();
+  sentences = sentences.filter(s => {
+    let key = s.replace(/[^\u0600-\u06FFa-zA-Z0-9]/g, "");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!sentences.length) {
+    return "لم أجد جملًا واضحة كافية للتلخيص. جرّب ملف PDF يحتوي على نص قابل للاستخراج.";
+  }
+  // كلمات تدل على تعريفات أو قوانين أو أفكار أساسية
+  const importantWords =
+    /يعرف|تعريف|يسمى|تسمى|القانون|قانون|العلاقة|يتناسب|ينص|نستنتج|نلاحظ|وحدة قياس|التسارع|السرعة|الإزاحة|القوة|الطاقة|الشغل|العزم|التردد|الزمن الدوري|الحركة|الاتزان|الاحتكاك|المتجهات|المحصلة|حيث إن|بالتالي|لذلك/;
+  const formulaPattern =
+    /[=±×÷∝√]|sin|cos|tan|rad\/s|m\/s|N\b|J\b|kg\b|Hz\b/i;
+  // ترتيب الجمل بحسب فائدتها الدراسية
+  let ranked = sentences.map((s, index) => {
+    let score = 0;
+    if (importantWords.test(s)) score += 4;
+    if (formulaPattern.test(s)) score += 3;
+    if (/\d/.test(s)) score += 1;
+    if (s.length >= 45 && s.length <= 260) score += 2;
+    if (s.length > 400) score -= 3;
+    if (/www\.|http|SIGNED TRACK|RESOURCE|المؤلفون|الجزء الأول/.test(s)) {
+      score -= 8;
+    }
+    return { text: s, score, index };
+  });
+  ranked.sort((a, b) => b.score - a.score || a.index - b.index);
+  let ratio =
+    style === "brief" ? 0.15 :
+    style === "terms" ? 0.30 :
+    style === "compare" ? 0.22 : 0.35;
+  let maxCount =
+    style === "brief" ? 12 :
+    style === "terms" ? 20 :
+    style === "compare" ? 16 : 30;
+  let limit = Math.min(
+    maxCount,
+    Math.max(5, Math.ceil(sentences.length * ratio))
+  );
+  let chosen = ranked
+    .slice(0, limit)
+    .sort((a, b) => a.index - b.index);
+  let heading =
+    style === "brief" ? "أهم الأفكار للمراجعة" :
+    style === "terms" ? "التعريفات والقوانين والنقاط المهمة" :
+    style === "compare" ? "نقاط للمقارنة" :
+    "ملخص منظّم للمراجعة";
+  let result = chosen
+    .map((item, i) => `${i + 1}. ${item.text}`)
+    .join("\n\n");
+  return `${heading}${scope ? " — النطاق: " + scope : ""}\n\n${result}\n\nتنبيه: هذا تلخيص محلي قائم على قواعد اختيار الجمل، وليس نموذج ذكاء اصطناعي يفهم المحتوى بالكامل. راجع القوانين والأرقام مع الكتاب.`;
+}
 $('#makeSummary').onclick=()=>{const b=db.books.find(x=>x.id===$('#summaryBook').value);if(!b){toast('أضف كتابًا أولًا');return}$('#summaryText').textContent=localSummary(b.text,$('#summaryStyle').value,$('#summaryScope').value.trim());$('#summaryOutput').classList.remove('hidden');$('#summaryOutput').scrollIntoView({behavior:'smooth'})};
 $('#copySummary').onclick=async()=>{try{await navigator.clipboard.writeText($('#summaryText').textContent);toast('تم نسخ الملخص')}catch{toast('تعذّر النسخ في هذا السياق')}};
 function generateQuestions(book,count,type){const ss=chunks(book.text);if(!ss.length)return [];let pool=ss.filter(s=>s.length<260).sort((a,b)=>b.length-a.length).slice(0,Math.max(count*4,25));if(!pool.length)pool=ss;let out=[];for(let i=0;i<Math.min(count,pool.length);i++){const s=pool[(i*7)%pool.length];if(type==='tf'){out.push({q:'اقرأ العبارة التالية وحدد صح أم خطأ: '+s,a:'قارن العبارة بالنص الأصلي؛ النسخة الأولية لا تنشئ عبارة معكوسة موثوقة تلقائيًا.'})}else if(type==='short'){out.push({q:'اشرح الفكرة الأساسية في المقطع التالي بكلماتك: '+s,a:'تحقق من إجابتك بمقارنتها بالمقطع الأصلي وإبراز المفهوم والعلاقة الأساسية.'})}else out.push({q:'سؤال مراجعة: ما الفكرة أو المعلومة الأساسية في العبارة التالية؟\\n'+s,a:'الإجابة المرجعية: '+s})}return out}
